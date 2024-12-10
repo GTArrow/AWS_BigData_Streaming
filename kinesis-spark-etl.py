@@ -72,7 +72,7 @@ def process_kinesis_stream(spark, rdd, output_path):
             df = spark.createDataFrame(filtered_records, schema=schema)
 
             # Add calculated FFWI and partition columns
-            df = df.withColumn("ffwi", udf_calculate_ffwi(df["temperature"], df["humidity"], df["windSpeed"]))
+            df = df.withColumn("ffwi", udf(lambda t, h, w: calculate_ffwi(t, h, w), DoubleType())(col("temperature"), col("humidity"), col("windSpeed"))) 
 
             # Map: Add logic for grouping data by region (latitude and longitude)
             df = df.withColumn("region", expr("concat(round(latitude, 1), '_', round(longitude, 1))"))
@@ -88,11 +88,16 @@ def process_kinesis_stream(spark, rdd, output_path):
                 )
             )
 
+            # Add calculated FFWI and partition columns
+            aggregated_df = aggregated_df.withColumn("year", year(col("timestamp").cast("timestamp"))) \
+                .withColumn("month", month(col("timestamp").cast("timestamp"))) \
+                .withColumn("day", dayofmonth(col("timestamp").cast("timestamp")))
+
             aggregated_df.printSchema()
             print(aggregated_df.show())
             print("Total number of records: " + str(aggregated_df.count()))
-            # Load: Write aggregated DataFrame to S3 as Parquet with partitioning
-            aggregated_df.write.mode("overwrite").partitionBy("timestamp").parquet(output_path)
+            # Write DataFrame to S3 as Parquet with partitioning
+            aggregated_df.write.mode("append").partitionBy("year", "month", "day").parquet(output_path)
     except Exception as e:
         print(f"Error processing stream: {e}")
 
